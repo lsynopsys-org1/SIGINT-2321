@@ -1,0 +1,22 @@
+name: CI-Polaris 
+on:
+  push:
+    branches: [ main, master, develop, stage, release ]
+  pull_request:
+    branches: [ main, master, develop, stage, release ]  
+jobs:
+  polaris-scan:
+    runs-on: [ ubuntu-latest ]
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v3
+  
+      - name: Polaris Full Scan
+        uses: synopsys-sig/synopsys-action@SIGINT-1236
+        with:
+          polaris_server_url: ${{ secrets.POLARIS_SERVER_URL }}
+          polaris_access_token: ${{ secrets.POLARIS_ACCESS_TOKEN }}
+          polaris_assessment_types: "SCA,SAST"
+          synopsys_bridge_download_url: "https://sig-repo.synopsys.com/artifactory/bds-integrations-release/com/synopsys/integration/synopsys-bridge/latest/synopsys-bridge-linux64.zip"
+          ### Uncomment below configuration if Synopsys Bridge diagnostic files needs to be uploaded
+          include_diagnostics: true
