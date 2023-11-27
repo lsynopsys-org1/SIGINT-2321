@@ -1,0 +1,317 @@
+#Copyright (c) 2023 Synopsys, Inc. All rights reserved worldwide.
+
+.run-synopsys-tools-powershell:
+  variables:
+    ARTIFACTORY_BRIDGE_URL: 'https://artifactory.internal.synopsys.com/artifactory/clops-local/clops.sig.synopsys.com/synopsys-bridge'
+  script: |
+    echo "Starting synopsys-template execution.."
+    echo "Windows platform"
+    $NETWORK_AIR_GAP = $env:NETWORK_AIR_GAP
+    echo "network Air gap:${NETWORK_AIR_GAP}${env:DOWNLOAD_BRIDGE_URL}"
+    $SYNOPSYS_BRIDGE_PATH = $env:SYNOPSYS_BRIDGE_PATH
+    ### If DOWNLOAD_BRIDGE_URL is not provided, check for DOWNLOAD_BRIDGE_VERSION or latest version ###
+          if($NETWORK_AIR_GAP -eq $false){
+            if(-not $env:DOWNLOAD_BRIDGE_URL) {
+            ### Bridge artifact url ###
+            $artifactoryURL = $env:ARTIFACTORY_BRIDGE_URL
+            $artifactHtml = Invoke-WebRequest -Uri $artifactoryURL -UseBasicParsing
+            $artfctLinks = $artifactHtml.Links.Href
+            $Regex = '(\d+)\.(\d+)\.(\d+)'
+            $Matches = [Regex]::Matches($artfctLinks, $Regex).Value
+    
+            $requiredVersion = ""
+        
+            ### Check if BRIDGE_DOWNLOAD_VERSION is provided and the provided version exists ###
+            if ($env:DOWNLOAD_BRIDGE_VERSION) {
+                if(-not $Matches.Contains($env:DOWNLOAD_BRIDGE_VERSION)) {
+                    throw "Provided bridge version not found in artifactory"
+                } else {
+                    $requiredVersion = $env:DOWNLOAD_BRIDGE_VERSION
+                }
+            } else {
+                ### Check for latest version of Bridge ###
+                if ($Matches.GetType() -like "string") {
+                    $latestVersion = $Matches.ToString()
+                } else { 
+                    $latestVersion = $Matches.Get(0)
+    
+                    foreach($version in $Matches) {
+                        if([System.Version]$version -gt [System.Version]$latestVersion) {
+                            $latestVersion = $version
+                        }
+                    }
+                }
+    
+                $requiredVersion = $latestVersion
+            }
+        ### Format URL of downloadable Bridge with the required version ###
+        $requiredVersionUrl = $artifactoryURL + $requiredVersion + "/synopsys-bridge-" + $requiredVersion + "-win64.zip"
+
+        $env:DOWNLOAD_BRIDGE_URL=$requiredVersionUrl
+    } else {
+        ### Bridge URL is provided. Validating Bridge URL ###
+        $downloadUrl = $env:DOWNLOAD_BRIDGE_URL
+
+        $fileNameInUrl = $downloadUrl.Substring($downloadURL.LastIndexOf('-') + 1)
+
+        if (!((([uri] $downloadUrl).Scheme -in 'http', 'https') -and 
+            ([uri] $downloadUrl).IsAbsoluteUri -and
+            $fileNameInUrl.Equals('win64.zip'))) {
+            throw "Invalid Bridge url for windows platform"
+        } 
+        if ($downloadUrl -match '.*synopsys-bridge-([0-9.]*).*') {
+            $requiredVersion = $matches[1]
+        } 
+            }
+      }
+      else{
+          echo "Network air gap has been enabled so skipping download bridge"
+      }
+
+      $defaultDirectory = "synopsys-bridge"
+      $bridgeDefaultDirectory = "$($env:USERPROFILE)\$($defaultDirectory)"
+      echo "default dir path:::${bridgeDefaultDirectory}"
+      echo "synopsys install dir path:::${SYNOPSYS_BRIDGE_PATH}"
+      if ($NETWORK_AIR_GAP -eq 'True') {
+          if ($SYNOPSYS_BRIDGE_PATH) {
+              if(Test-Path -Path $SYNOPSYS_BRIDGE_PATH'\synopsys-bridge.exe'){
+                    echo "synopsys install directory1 ${SYNOPSYS_BRIDGE_PATH}"
+                    $SYNOPSYS_BRIDGE_PATH=${SYNOPSYS_BRIDGE_PATH}
+              }
+              else{
+                echo "SYNOPSYS_BRIDGE_PATH not available"
+                break
+              }
+          }
+          elseif(Test-Path -Path $bridgeDefaultDirectory){
+               if(Test-Path -Path $bridgeDefaultDirectory'\synopsys-bridge.exe'){
+                    echo "synopsys default directory ${$bridgeDefaultDirectory}"
+                    $SYNOPSYS_BRIDGE_PATH = $bridgeDefaultDirectory
+               }
+               else{
+                    echo "Bridge Default not available"
+                    exit 1
+               }
+           }
+          else{
+            echo "Path is not available"
+            exit 1
+          }
+      }
+      
+       echo "Existing synopsys install directory: ${SYNOPSYS_BRIDGE_PATH}"
+     
+      if ($NETWORK_AIR_GAP -ne 'True' -and -not $SYNOPSYS_BRIDGE_PATH) {
+          echo " ${SYNOPSYS_BRIDGE_PATH} "
+          if(-not (Test-Path -Path $bridgeDefaultDirectory)) {
+              New-Item -ItemType Directory -Path $bridgeDefaultDirectory
+          }
+         $SYNOPSYS_BRIDGE_PATH = $bridgeDefaultDirectory
+      }
+
+      if ($NETWORK_AIR_GAP -ne 'True' ){
+        ### Matching the current bridge version from existing bridge package  ###
+        $versionFile = "$($SYNOPSYS_BRIDGE_PATH)\versions.txt"
+        $isBridgeExist = $false
+        echo "Bridge Path : $($SYNOPSYS_BRIDGE_PATH)"
+        if (Test-Path -Path $versionFile) {
+            $synopsysBridgePackage = "Synopsys Bridge Package: " + $requiredVersion
+            $SEL = get-content $versionFile
+            if ($SEL -imatch $synopsysBridgePackage) {
+                $isBridgeExist = $true
+            }
+        }
+      }
+      if ($NETWORK_AIR_GAP -ne 'True' -and $isBridgeExist -eq $false) {
+          echo "Downloadable Bridge URL - $($env:DOWNLOAD_BRIDGE_URL)"
+          ### Download Bridge ###
+          echo "Download Bridge$($SYNOPSYS_BRIDGE_PATH)"
+          echo "Download Bridge$($SYNOPSYS_BRIDGE_PATH)"
+          Invoke-WebRequest -Uri $env:DOWNLOAD_BRIDGE_URL -OutFile "$($SYNOPSYS_BRIDGE_PATH)\synopsys-bridge.zip"
+
+          ### Unzip Bridge ###
+          Expand-Archive -Path "$($SYNOPSYS_BRIDGE_PATH)\synopsys-bridge.zip" -Force -DestinationPath $SYNOPSYS_BRIDGE_PATH
+
+          ### Remove downloaded zip file ###
+          Remove-Item "$($SYNOPSYS_BRIDGE_PATH)\synopsys-bridge.zip"
+      } else {
+          echo "Bridge already exists, download has been skipped"
+      }
+
+      ### Execute Bridge command ###
+      $executableBridge = "$($SYNOPSYS_BRIDGE_PATH)\synopsys-bridge.exe"
+      $arguments = ""
+
+      if ($env:INCLUDE_DIAGNOSTICS) {
+          ### Append diagnostic argument in bridge command if INCLUDE_DIAGNOSTICS is passed ###
+          $arguments = '--stage','gitlab-template-executor','--diagnostics'
+      } else {
+          $arguments = '--stage','gitlab-template-executor'
+      }
+      &$executableBridge $arguments
+
+
+.run-synopsys-tools:
+  variables:
+    ARTIFACTORY_BRIDGE_URL : 'https://artifactory.internal.synopsys.com/artifactory/clops-local/clops.sig.synopsys.com/synopsys-bridge/'
+  script: |
+    #!/usr/bin/env bash
+    echo "Starting synopsys-template execution.."
+    echo "$OSTYPE platformhere"
+    
+    bridgeDefaultDirectory="synopsys-bridge"
+    bridgeDefaultPath=""
+    synopsysBridgeVersion=""
+    diagnostics=""
+    networkAirGap=$NETWORK_AIR_GAP
+    echo "$NETWORK_AIR_GAP NETWORK_AIR_GAP"
+    OSTYPE=$(echo "$OSTYPE" | tr '[:upper:]' '[:lower:]')
+    if [[ "$OSTYPE" == *"linux"* ]]; then
+        bridgeDefaultPath="${HOME}/${bridgeDefaultDirectory}"
+        platform="linux64"
+    elif [[ "$OSTYPE" == *"darwin"* ]]; then
+        bridgeDefaultPath="${HOME}/${bridgeDefaultDirectory}"
+        platform="macosx"
+    elif [[ "$OSTYPE" == *"cygwin"* || *"$OSTYPE" == *"msys"* ]]; then
+        bridgeDefaultPath="${USERPROFILE}\${bridgeDefaultDirectory}"
+        platform="win64"
+    fi
+    
+    ### If BRIDGE_DOWNLOAD_URL is not provided, check for BRIDGE_DOWNLOAD_VERSION or latest version ###
+     echo "DOWNLOAD_BRIDGE_VERSION download version"
+    if [[ $networkAirGap != 'true' && $DOWNLOAD_BRIDGE_URL == "" ]]; then
+        ### Get all available bridge versions and store result in artifactoryResults temp file ###
+        curl -X GET --header "Accept: text/html" "$ARTIFACTORY_BRIDGE_URL/" >> artifactoryResults.html
+        IFS=$'\n'
+        echo "DOWNLOAD_BRIDGE_VERSION download version"
+        versionArray=($(sed -n 's/.*href="\([0-9.^"]*\).*/\1/p' artifactoryResults.html))
+        echo "DOWNLOAD_BRIDGE_VERSION download version"
+        echo "$DOWNLOAD_BRIDGE_VERSION download version"
+        ### Check if BRIDGE_DOWNLOAD_VERSION is provided and the provided version exists ###
+        if [[ $DOWNLOAD_BRIDGE_VERSION != "" ]]; then
+            validBridgeVersion=false
+            for i in "${versionArray[@]}"
+            do
+                if [[ $i != "" && $i != ".." ]]; then
+                    if [[ $i == $DOWNLOAD_BRIDGE_VERSION ]]; then
+                        validBridgeVersion=true
+                        break
+                    fi
+                fi
+            done
+            if $validBridgeVersion; then
+                echo "Valid bridge version";
+                bridgeDownloadUrl="$ARTIFACTORY_BRIDGE_URL/$DOWNLOAD_BRIDGE_VERSION/synopsys-bridge-$DOWNLOAD_BRIDGE_VERSION-$platform.zip"
+                synopsysBridgeVersion=$DOWNLOAD_BRIDGE_VERSION
+            else
+                echo "Provided bridge version not found in artifactory";
+                exit 1
+            fi
+    
+        ### Check for latest version of Bridge ###
+        else
+            extractVersions=( $(printf "%s\n" ${versionArray[@]} | sort -V) )
+            typeset -p extractVersions
+            for (( i=${#extractVersions[@]}-1 ; i>=0 ; i-- )) ;
+            do
+                if [[ $i != "" && $i != ".." ]]; then
+                    latestVersion="${extractVersions[i]}"
+                    break
+                fi
+            done
+            bridgeDownloadUrl="$ARTIFACTORY_BRIDGE_URL/$latestVersion/synopsys-bridge-$latestVersion-$platform.zip"
+            synopsysBridgeVersion=$latestVersion
+        fi
+        rm -rf artifactoryResults.html
+    elif [[ $networkAirGap != 'true' ]]; then
+      ### Validate bridge url ###
+      shopt -s nocasematch
+      regex='(https?|http)://[-[:alnum:]\+&@#/%?=~_|!:,.;]*[-[:alnum:]\+&@#/%=~_|]'
+      invalidUrlMsg="Invalid Bridge URL for $OSTYPE platform"
+      if [[ ! $DOWNLOAD_BRIDGE_URL =~ $regex ]]; then
+          echo $invalidUrlMsg
+          exit 1
+      fi
+      downloadFileName=$(echo $DOWNLOAD_BRIDGE_URL | awk -F"-" '{print $NF}')
+      if [[ $downloadFileName != "$platform.zip" ]]; then
+          echo $invalidUrlMsg
+          exit 1
+      fi
+      bridgeDownloadUrl=$DOWNLOAD_BRIDGE_URL
+      synopsysBridgeVersion=`(echo $bridgeDownloadUrl | sed "s/^.*synopsys-bridge-\([0-9.]*\).*/\1/")`
+    fi
+        if [[ $networkAirGap == true ]]; then
+            if [[ "$OSTYPE" == *"linux"* || "$OSTYPE" == *"darwin"* ]]; then
+              if [[ $SYNOPSYS_BRIDGE_PATH != '' ]]; then
+                  if [[ -e ${SYNOPSYS_BRIDGE_PATH}/"synopsys-bridge" ]]; then
+                      SYNOPSYS_BRIDGE_PATH=${SYNOPSYS_BRIDGE_PATH}
+                  else
+                      echo "SYNOPSYS_BRIDGE_PATH not available"
+                      exit 1
+                  fi
+              elif [[ -d ${bridgeDefaultPath} ]]; then
+                  if [[ -e ${bridgeDefaultPath}/"synopsys-bridge" ]]; then
+                      SYNOPSYS_BRIDGE_PATH=${bridgeDefaultPath}
+                  else
+                      echo "Bridge Default not available"
+                      exit 1
+                  fi
+              else
+                  echo "Path is not available"
+                  exit 1
+              fi
+            elif [[ "$OSTYPE" == *"cygwin"* || *"$OSTYPE" == *"msys"* ]]; then
+                  echo "OS platform is not supported"
+                  exit 1
+           fi
+        fi
+    ### Creating default directory if SYNOPSYS_BRIDGE_PATH input is not passed ###
+    if [[ "$SYNOPSYS_BRIDGE_PATH" == "" ]]; then
+          mkdir -p ${bridgeDefaultPath}
+          SYNOPSYS_BRIDGE_PATH=$bridgeDefaultPath
+    fi
+    
+    ### Matching the current bridge version from existing bridge package  ###
+    versionFile="$SYNOPSYS_BRIDGE_PATH/versions.txt"
+    isBridgeExist=false
+    echo "Bridge Path : $SYNOPSYS_BRIDGE_PATH"
+    if [[ -e $versionFile ]]; then
+          syopsysBridgePackage="Synopsys Bridge Package: $synopsysBridgeVersion"
+          existingPackageVersion=$(sed -n "/Synopsys Bridge Package: $synopsysBridgeVersion/p" $versionFile)
+          if [[ $existingPackageVersion != "" && $existingPackageVersion == $syopsysBridgePackage ]]; then
+              isBridgeExist=true
+          fi
+    fi
+    
+    ### Append diagnostic argument in bridge command if INCLUDE_DIAGNOSTICS is passed ###
+    if [[ $INCLUDE_DIAGNOSTICS == true ]]; then
+          diagnostics="--diagnostics"
+    fi
+    
+    if [[ "$OSTYPE" == *"linux"* || "$OSTYPE" == *"darwin"* ]]; then
+        if [[ $networkAirGap != true ]]; then
+                  if [[ $isBridgeExist == false ]]; then
+                     ### Download Bridge ###
+                                     echo "Downloadable Bridge URL - $bridgeDownloadUrl"
+                                     curl -L $bridgeDownloadUrl -o "${SYNOPSYS_BRIDGE_PATH}/synopsys-bridge.zip"
+    
+                                     ### Unzip Bridge ###
+                                     unzip -o "${SYNOPSYS_BRIDGE_PATH}/synopsys-bridge.zip" -d "${SYNOPSYS_BRIDGE_PATH}"
+    
+                                     ### Remove downloaded zip file ###
+                                     rm "${SYNOPSYS_BRIDGE_PATH}/synopsys-bridge.zip"
+                  else
+                     echo "Bridge already exists, download has been skipped"
+    
+                  fi
+        else
+                    echo "Network air gap has been enabled so skipping download bridge."
+        fi
+        chmod +x "${SYNOPSYS_BRIDGE_PATH}"
+        ${SYNOPSYS_BRIDGE_PATH}/synopsys-bridge  --stage blackduck --input /Users/kirann/Library/CloudStorage/OneDrive-Synopsys\,Inc/Desktop/input.json $diagnostics
+    
+    elif [[ "$OSTYPE" == *"cygwin"* || *"$OSTYPE" == *"msys"* ]]; then
+      echo "OS platform is not supported"
+      exit 1
+    fi
+
