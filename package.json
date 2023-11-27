@@ -1,5 +1,5 @@
 {
-  "name": "goof_test",
+  "name": "goof_test_SIGINT-1388",
   "version": "1.0.1",
   "description": "A vulnerable todo demo application",
   "homepage": "https://snyk.io/",
