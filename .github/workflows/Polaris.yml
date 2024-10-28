@@ -1,22 +1,38 @@
-name: CI-Polaris 
+name: CI-Polaris-Basic 
 on:
   push:
     branches: [ main, master, develop, stage, release ]
   pull_request:
-    branches: [ main, master, develop, stage, release ]  
+    branches: [ main, master, develop, stage, release ]
+  workflow_dispatch:
+  
 jobs:
-  polaris-scan:
-    runs-on: [ ubuntu-latest ]
+  build:
+    runs-on: [ self-hosted ]
     steps:
       - name: Checkout Source
         uses: actions/checkout@v3
-  
-      - name: Polaris Full Scan
-        uses: synopsys-sig/synopsys-action@SIGINT-1236
+      - name: Polaris Scan
+        uses: blackduck-inc/black-duck-security-scan@FOLDER_CHANGE
         with:
+          ### SCANNING: Required fields
+          synopsys_bridge_download_url: https://artifactory.internal.synopsys.com/artifactory/clops-local/clops.sig.synopsys.com/bridge/binaries/bridge-cli-bundle/2.9.3/bridge-cli-bundle-2.9.3-macos_arm.zip
           polaris_server_url: ${{ secrets.POLARIS_SERVER_URL }}
           polaris_access_token: ${{ secrets.POLARIS_ACCESS_TOKEN }}
           polaris_assessment_types: "SCA,SAST"
-          synopsys_bridge_download_url: "https://sig-repo.synopsys.com/artifactory/bds-integrations-release/com/synopsys/integration/synopsys-bridge/latest/synopsys-bridge-linux64.zip"
-          ### Uncomment below configuration if Synopsys Bridge diagnostic files needs to be uploaded
-          include_diagnostics: true
+          
+          ### SCANNING: Optional fields
+          # polaris_application_name: ${{ github.event.repository.name }}
+          # polaris_project_name: ${{ github.event.repository.name }}
+          
+          ### PULL REQUEST COMMENTS: Uncomment below to enable
+          # polaris_prComment_enabled: true 
+          # github_token: ${{ secrets.GITHUB_TOKEN }} # Required when PR comments is enabled
+
+          ### SARIF report parameters
+          #polaris_reports_sarif_create: true
+          #polaris_upload_sarif_report: true
+          
+          ### Signature scan
+          #polaris_test_sca_type: "SCA-SIGNATURE"
+            
